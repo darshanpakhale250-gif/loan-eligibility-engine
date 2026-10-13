@@ -19,7 +19,7 @@ def normalize(value):
     if not isinstance(value, str):
         return ""
     text = html.unescape(value)
-    markers = ("â‚¹", "â€™", "â€œ", "â€˜", "â€"", "â€"", "â€¦")
+    markers = ("â‚¹", "â€™", "â€œ", "â€˜", "â€\x9d", "â€“", "â€”", "â€¦")
     if any(marker in text for marker in markers):
         try:
             repaired = text.encode("cp1252").decode("utf-8")
@@ -29,7 +29,7 @@ def normalize(value):
             pass
     replacements = {
         "â‚¹": "₹", "â€™": "'", "â€˜": "'", "â€œ": "\u201c",
-        "â€\x9d": "\u201d", "â€"": "–", "â€"": "—", "â€¦": "…",
+        "â€\x9d": "\u201d", "â€“": "–", "â€”": "—", "â€¦": "…",
         "\u00a0": " ",
     }
     for old, new in replacements.items():

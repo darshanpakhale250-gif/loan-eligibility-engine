@@ -1,0 +1,247 @@
+{
+  "name": "B_User_Loan_Matching",
+  "id": "wf-loan-matching-02",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "loan-match",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-match",
+      "name": "Webhook Trigger (loan-match)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        160,
+        340
+      ],
+      "webhookId": "loan-match"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"accepted\",\n  \"batch_id\": \"{{ $json.body.batch_id }}\",\n  \"message\": \"Matching pipeline initiated\"\n}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "node-respond-202",
+      "name": "Respond 202 Immediately",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        380,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE upload_batches SET status = 'matching' WHERE batch_id = '{{ $json.body.batch_id }}'::uuid;\nSELECT COUNT(*) AS pairs_total\nFROM users u\nCROSS JOIN loan_products p\nWHERE u.batch_id = '{{ $json.body.batch_id }}'::uuid AND p.is_active = TRUE;"
+      },
+      "id": "node-sql-pairs-total",
+      "name": "Init Batch & Count Pairs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        380,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=WITH prefiltered AS (\n  SELECT\n    u.user_id,\n    p.id AS product_id,\n    p.lender_name,\n    p.product_name,\n    p.interest_rate_min,\n    p.min_monthly_income,\n    p.has_qualitative_rules,\n    u.monthly_income,\n    u.credit_score,\n    u.age,\n    u.employment_status,\n    CASE\n      WHEN p.min_monthly_income IS NOT NULL AND p.min_monthly_income > 0 THEN\n        ROUND(((u.monthly_income - p.min_monthly_income) / p.min_monthly_income) * 100, 2)\n      ELSE 0\n    END AS income_margin_pct,\n    CASE\n      WHEN p.min_credit_score IS NOT NULL THEN\n        u.credit_score - p.min_credit_score\n      ELSE 50\n    END AS score_margin\n  FROM users u\n  CROSS JOIN loan_products p\n  WHERE u.batch_id = '{{ $('Webhook Trigger (loan-match)').first().json.body.batch_id }}'::uuid\n    AND p.is_active = TRUE\n    AND (p.min_monthly_income IS NULL OR u.monthly_income >= p.min_monthly_income)\n    AND (p.min_credit_score IS NULL OR u.credit_score >= p.min_credit_score)\n    AND (p.max_credit_score IS NULL OR u.credit_score <= p.max_credit_score)\n    AND (p.age_min IS NULL OR u.age >= p.age_min)\n    AND (p.age_max IS NULL OR u.age <= p.age_max)\n    AND (\n      p.eligible_employment IS NULL\n      OR CARDINALITY(p.eligible_employment) = 0\n      OR u.employment_status = ANY(p.eligible_employment)\n    )\n)\nINSERT INTO matches (user_id, product_id, stage, score, reason, notification_status)\nSELECT\n  user_id,\n  product_id,\n  'sql',\n  score_margin,\n  'Passed SQL hard criteria pre-filter',\n  'pending'\nFROM prefiltered\nON CONFLICT (user_id, product_id) DO NOTHING;\n\nSELECT\n  u.user_id,\n  p.id AS product_id,\n  p.lender_name,\n  p.product_name,\n  p.interest_rate_min,\n  p.min_monthly_income,\n  p.has_qualitative_rules,\n  u.monthly_income,\n  u.credit_score,\n  u.age,\n  u.employment_status,\n  CASE\n    WHEN p.min_monthly_income IS NOT NULL AND p.min_monthly_income > 0 THEN\n      ROUND(((u.monthly_income - p.min_monthly_income) / p.min_monthly_income) * 100, 2)\n    ELSE 0\n  END AS income_margin_pct,\n  CASE\n    WHEN p.min_credit_score IS NOT NULL THEN\n      u.credit_score - p.min_credit_score\n    ELSE 50\n  END AS score_margin\nFROM users u\nCROSS JOIN loan_products p\nWHERE u.batch_id = '{{ $('Webhook Trigger (loan-match)').first().json.body.batch_id }}'::uuid\n  AND p.is_active = TRUE\n  AND (p.min_monthly_income IS NULL OR u.monthly_income >= p.min_monthly_income)\n  AND (p.min_credit_score IS NULL OR u.credit_score >= p.min_credit_score)\n  AND (p.max_credit_score IS NULL OR u.credit_score <= p.max_credit_score)\n  AND (p.age_min IS NULL OR u.age >= p.age_min)\n  AND (p.age_max IS NULL OR u.age <= p.age_max)\n  AND (\n    p.eligible_employment IS NULL\n    OR CARDINALITY(p.eligible_employment) = 0\n    OR u.employment_status = ANY(p.eligible_employment)\n  );"
+      },
+      "id": "node-sql-prefilter",
+      "name": "Stage 1: SQL Pre-filter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        600,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const pairs = $input.all().map(item => item.json);\nconst batchId = $('Webhook Trigger (loan-match)').first().json.body.batch_id;\nconst totalSqlPairs = pairs.length;\n\n// Group by user_id\nconst byUser = {};\nfor (const p of pairs) {\n  if (!byUser[p.user_id]) byUser[p.user_id] = [];\n  byUser[p.user_id].push(p);\n}\n\nconst topKPairs = [];\nconst clearMatches = [];\nconst ambiguousPairs = [];\n\nfor (const userId in byUser) {\n  const userProducts = byUser[userId];\n  // Sort by lowest interest rate\n  userProducts.sort((a, b) => {\n    const ra = a.interest_rate_min !== null ? Number(a.interest_rate_min) : 999;\n    const rb = b.interest_rate_min !== null ? Number(b.interest_rate_min) : 999;\n    return ra - rb;\n  });\n\n  // Top K (5)\n  const top5 = userProducts.slice(0, 5);\n  for (const pair of top5) {\n    topKPairs.push(pair);\n    // Margin evaluation\n    const marginScore = Number(pair.score_margin) || 0;\n    const incMargin = Number(pair.income_margin_pct) || 0;\n    const hasQual = Boolean(pair.has_qualitative_rules);\n    const hasIncomeRule = pair.min_monthly_income !== null;\n\n    if (incMargin >= 20 && marginScore >= 30 && !hasQual && hasIncomeRule) {\n      clearMatches.push({\n        ...pair,\n        stage: 'rules',\n        score: marginScore,\n        reason: `Clear match: rate ${pair.interest_rate_min}%, +${incMargin}% income margin`\n      });\n    } else {\n      ambiguousPairs.push({\n        ...pair,\n        profile_key: `${Math.floor(Number(pair.monthly_income)/10000)*10}k_${Math.floor(Number(pair.credit_score)/50)*50}_${Math.floor(Number(pair.age)/5)*5}_${pair.employment_status}`\n      });\n    }\n  }\n}\n\nconst rawMatches = JSON.stringify(clearMatches);\nconst sqlEscapedClearMatches = rawMatches.replace(/'/g, \"''\");\n\nreturn [{\n  json: {\n    batch_id: batchId,\n    pairs_after_sql: totalSqlPairs,\n    pairs_after_rules: topKPairs.length,\n    clearMatches,\n    clearCount: clearMatches.length,\n    ambiguousPairs,\n    ambiguousCount: ambiguousPairs.length,\n    clearMatchesJson: rawMatches,\n    sqlEscapedClearMatches: sqlEscapedClearMatches\n  }\n}];"
+      },
+      "id": "node-code-stage2",
+      "name": "Stage 2: Rules & Top-K Ranking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO matches (user_id, product_id, stage, score, reason, notification_status)\nSELECT\n  m.user_id,\n  m.product_id,\n  m.stage,\n  m.score,\n  m.reason,\n  'pending'\nFROM jsonb_to_recordset('{{ $json.sqlEscapedClearMatches }}'::jsonb) AS m(\n  user_id TEXT, product_id INT, stage TEXT, score NUMERIC, reason TEXT\n)\nON CONFLICT (user_id, product_id)\nDO UPDATE SET\n  stage = EXCLUDED.stage,\n  score = EXCLUDED.score,\n  reason = EXCLUDED.reason;"
+      },
+      "id": "node-upsert-clear-matches",
+      "name": "Upsert Clear Matches",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1040,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=WITH match_count AS (\n  SELECT COUNT(*) AS total_matches\n  FROM matches m\n  JOIN users u ON m.user_id = u.user_id\n  WHERE u.batch_id = '{{ $('Stage 2: Rules & Top-K Ranking').first().json.batch_id }}'::uuid\n)\nUPDATE upload_batches\nSET\n  pairs_total = {{ $('Init Batch & Count Pairs').first().json.pairs_total || 0 }},\n  pairs_after_sql = {{ $('Stage 2: Rules & Top-K Ranking').first().json.pairs_after_sql || 0 }},\n  pairs_after_rules = {{ $('Stage 2: Rules & Top-K Ranking').first().json.pairs_after_rules || 0 }},\n  pairs_sent_to_llm = 0,\n  pairs_matched = (SELECT total_matches FROM match_count),\n  status = 'matching'\nWHERE batch_id = '{{ $('Stage 2: Rules & Top-K Ranking').first().json.batch_id }}'::uuid;"
+      },
+      "id": "node-update-funnel",
+      "name": "Update Batch Funnel Counters",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1260,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/loan-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"batch_id\": \"{{ $('Stage 2: Rules & Top-K Ranking').first().json.batch_id }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node-http-trigger-c",
+      "name": "Trigger Workflow C",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1480,
+        420
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-header-webhook",
+          "name": "Webhook Secret Header"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger (loan-match)": {
+      "main": [
+        [
+          {
+            "node": "Respond 202 Immediately",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Init Batch & Count Pairs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Batch & Count Pairs": {
+      "main": [
+        [
+          {
+            "node": "Stage 1: SQL Pre-filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 1: SQL Pre-filter": {
+      "main": [
+        [
+          {
+            "node": "Stage 2: Rules & Top-K Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage 2: Rules & Top-K Ranking": {
+      "main": [
+        [
+          {
+            "node": "Upsert Clear Matches",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Batch Funnel Counters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Clear Matches": {
+      "main": [
+        [
+          {
+            "node": "Update Batch Funnel Counters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Batch Funnel Counters": {
+      "main": [
+        [
+          {
+            "node": "Trigger Workflow C",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  }
+}

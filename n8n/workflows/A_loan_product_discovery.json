@@ -1,0 +1,235 @@
+{
+  "name": "A_Loan_Product_Discovery",
+  "id": "wf-loan-discovery-01",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-trigger",
+      "name": "Schedule Trigger (02:00 IST)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "node-manual-trigger",
+      "name": "Manual Trigger (Demo)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://backend:8000/internal/crawl",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node-http-crawl",
+      "name": "HTTP Request Crawl",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        380
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-header-internal",
+          "name": "Internal Token Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst products = response.products || [];\nconst stats = response.stats || {};\n\nconst validProducts = [];\nfor (const p of products) {\n  if (!p.product_name || !p.lender_name || !p.source_url) {\n    continue;\n  }\n  if (p.interest_rate_min !== null && p.interest_rate_min !== undefined) {\n    const r = Number(p.interest_rate_min);\n    if (r < 0 || r > 100) continue;\n  }\n  if (p.interest_rate_max !== null && p.interest_rate_max !== undefined) {\n    const r = Number(p.interest_rate_max);\n    if (r < 0 || r > 100) continue;\n  }\n  validProducts.push(p);\n}\n\nconst rawJson = JSON.stringify(validProducts);\nconst sqlEscapedJson = rawJson.replace(/'/g, \"''\");\n\nreturn [{\n  json: {\n    validProducts,\n    count: validProducts.length,\n    stats,\n    productsJson: rawJson,\n    sqlEscapedJson: sqlEscapedJson\n  }\n}];"
+      },
+      "id": "node-code-validate",
+      "name": "Validate & Clean Products",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-products",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-if-valid",
+      "name": "Has Valid Products?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO loan_products (\n  lender_name, product_name, source_url,\n  interest_rate_min, interest_rate_max, interest_rate_basis,\n  loan_amount_min, loan_amount_max, age_min, age_max,\n  min_credit_score, max_credit_score, eligible_employment,\n  min_monthly_income_rules, processing_fee, eligibility_criteria, raw_criteria,\n  min_monthly_income, has_qualitative_rules, source, is_active, stored_at\n)\nSELECT\n  p.lender_name, p.product_name, p.source_url,\n  p.interest_rate_min, p.interest_rate_max, p.interest_rate_basis,\n  p.loan_amount_min, p.loan_amount_max, p.age_min, p.age_max,\n  p.min_credit_score, p.max_credit_score, p.eligible_employment,\n  p.min_monthly_income_rules, p.processing_fee, p.eligibility_criteria, p.raw_criteria,\n  p.min_monthly_income, p.has_qualitative_rules, 'crawl', TRUE, NOW()\nFROM jsonb_to_recordset('{{ $json.sqlEscapedJson }}'::jsonb) AS p(\n  lender_name TEXT, product_name TEXT, source_url TEXT,\n  interest_rate_min NUMERIC, interest_rate_max NUMERIC, interest_rate_basis TEXT,\n  loan_amount_min NUMERIC, loan_amount_max NUMERIC, age_min INT, age_max INT,\n  min_credit_score INT, max_credit_score INT, eligible_employment TEXT[],\n  min_monthly_income_rules JSONB, processing_fee JSONB, eligibility_criteria TEXT, raw_criteria JSONB,\n  min_monthly_income NUMERIC, has_qualitative_rules BOOLEAN\n)\nON CONFLICT (lender_name, product_name, source_url)\nDO UPDATE SET\n  interest_rate_min = EXCLUDED.interest_rate_min,\n  interest_rate_max = EXCLUDED.interest_rate_max,\n  interest_rate_basis = EXCLUDED.interest_rate_basis,\n  loan_amount_min = EXCLUDED.loan_amount_min,\n  loan_amount_max = EXCLUDED.loan_amount_max,\n  age_min = EXCLUDED.age_min,\n  age_max = EXCLUDED.age_max,\n  min_credit_score = EXCLUDED.min_credit_score,\n  max_credit_score = EXCLUDED.max_credit_score,\n  eligible_employment = EXCLUDED.eligible_employment,\n  min_monthly_income_rules = EXCLUDED.min_monthly_income_rules,\n  processing_fee = EXCLUDED.processing_fee,\n  eligibility_criteria = EXCLUDED.eligibility_criteria,\n  raw_criteria = EXCLUDED.raw_criteria,\n  min_monthly_income = EXCLUDED.min_monthly_income,\n  has_qualitative_rules = EXCLUDED.has_qualitative_rules,\n  stored_at = NOW(),\n  is_active = TRUE;"
+      },
+      "id": "node-postgres-upsert",
+      "name": "Postgres Bulk Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1160,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Validate & Clean Products').first().json;\nreturn [{\n  json: {\n    status: 'success',\n    products_upserted: prev.count,\n    crawl_stats: prev.stats,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-code-summary",
+      "name": "Crawl Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Validate & Clean Products').first().json;\nreturn [{\n  json: {\n    status: 'fallback_kept',\n    message: 'No new valid products extracted; seed products preserved',\n    crawl_stats: prev.stats,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-code-fallback",
+      "name": "Log Seed Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (02:00 IST)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Crawl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger (Demo)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Crawl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Crawl": {
+      "main": [
+        [
+          {
+            "node": "Validate & Clean Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Clean Products": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Products?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Products?": {
+      "main": [
+        [
+          {
+            "node": "Postgres Bulk Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Seed Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Bulk Upsert": {
+      "main": [
+        [
+          {
+            "node": "Crawl Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  }
+}

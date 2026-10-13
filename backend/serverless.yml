@@ -1,0 +1,84 @@
+service: loan-eligibility-engine
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.11
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 60
+  environment:
+    POSTGRES_HOST: ${env:POSTGRES_HOST, 'rds.internal.example.com'}
+    POSTGRES_PORT: ${env:POSTGRES_PORT, '5432'}
+    POSTGRES_USER: ${env:POSTGRES_USER, 'loan_admin'}
+    POSTGRES_PASSWORD: ${env:POSTGRES_PASSWORD, 'change_me'}
+    POSTGRES_DB: ${env:POSTGRES_DB, 'loan_engine'}
+    WEBHOOK_SECRET: ${env:WEBHOOK_SECRET, 'secret-webhook'}
+    N8N_WEBHOOK_BASE_INTERNAL: ${env:N8N_WEBHOOK_BASE_INTERNAL, 'http://n8n.internal:5678/webhook'}
+    S3_BUCKET_NAME: !Ref UploadsBucket
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+          Resource:
+            - !Sub "${UploadsBucket.Arn}/*"
+
+# NOTE ON RDS / VPC:
+# If PostgreSQL runs inside an Amazon VPC (e.g. AWS RDS), attach the Lambda functions
+# to the corresponding VPC subnets and security groups:
+# vpc:
+#   securityGroupIds:
+#     - sg-0123456789abcdef0
+#   subnetIds:
+#     - subnet-0123456789abcdef0
+#     - subnet-0fedcba9876543210
+
+package:
+  patterns:
+    - '!node_modules/**'
+    - '!.git/**'
+    - '!tests/**'
+    - '!__pycache__/**'
+    - 'app/**'
+    - 'lambda_handlers/**'
+
+functions:
+  presignUpload:
+    handler: lambda_handlers/presign.handler
+    description: Generate S3 presigned PUT URL and initialize batch record
+    events:
+      - httpApi:
+          path: /api/uploads
+          method: post
+
+  processCsvUpload:
+    handler: lambda_handlers/process_csv.handler
+    description: Ingest CSV uploaded to S3, validate rows, bulk upsert, trigger n8n
+    timeout: 300
+    memorySize: 1024
+    events:
+      - s3:
+          bucket: !Ref UploadsBucket
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: uploads/
+            - suffix: .csv
+          existing: true
+
+resources:
+  Resources:
+    UploadsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: !Sub "loan-eligibility-uploads-${AWS::AccountId}-${self:provider.stage}"
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders: ['*']
+              AllowedMethods: [PUT, POST, GET]
+              AllowedOrigins: ['*']
+              MaxAge: 3000

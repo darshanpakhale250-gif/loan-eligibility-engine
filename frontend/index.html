@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loan Eligibility Engine</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Loan Eligibility Engine</h1>
+      <p class="subtitle">Automated borrower matching &amp; personalized credit notification pipeline</p>
+    </header>
+
+    <main>
+      <!-- Upload Section -->
+      <section class="card upload-section">
+        <h2>Borrower Batch Ingestion</h2>
+        <div id="drop-zone" class="drop-zone">
+          <svg class="upload-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p class="drop-text">Drag and drop your borrower <code>.csv</code> file here, or click to browse</p>
+          <input type="file" id="file-input" accept=".csv" style="display: none;">
+          <button id="browse-btn" class="btn btn-secondary">Select CSV File</button>
+        </div>
+        <div id="file-info" class="file-info" style="display: none;">
+          <span id="file-name" class="file-name"></span>
+          <span id="file-size" class="file-size"></span>
+          <button id="upload-btn" class="btn btn-primary">Start Ingestion</button>
+        </div>
+      </section>
+
+      <!-- Processing Progress & Stepper -->
+      <section id="status-card" class="card status-card" style="display: none;">
+        <h2>Processing Status</h2>
+        <div class="stepper">
+          <div class="step" id="step-uploaded">
+            <div class="step-circle">1</div>
+            <div class="step-label">Uploaded</div>
+          </div>
+          <div class="step-line"></div>
+          <div class="step" id="step-parsed">
+            <div class="step-circle">2</div>
+            <div class="step-label">Parsed</div>
+          </div>
+          <div class="step-line"></div>
+          <div class="step" id="step-matched">
+            <div class="step-circle">3</div>
+            <div class="step-label">Matched</div>
+          </div>
+          <div class="step-line"></div>
+          <div class="step" id="step-notified">
+            <div class="step-circle">4</div>
+            <div class="step-label">Emails Sent</div>
+          </div>
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+          <div class="metric-item">
+            <div class="metric-value" id="val-total">0</div>
+            <div class="metric-label">Total Rows</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value" id="val-valid">0</div>
+            <div class="metric-label">Valid Users</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value" id="val-rejected">0</div>
+            <div class="metric-label">Rejected Rows</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value" id="val-matched">0</div>
+            <div class="metric-label">Eligible Matches</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value" id="val-emails">0</div>
+            <div class="metric-label">Emails Sent</div>
+          </div>
+        </div>
+
+        <!-- Funnel Breakdown -->
+        <div class="funnel-details">
+          <h3>Optimization Funnel</h3>
+          <div class="funnel-stats">
+            <span>Pairs Total: <strong id="funnel-total">-</strong></span> &bull;
+            <span>After SQL Filter: <strong id="funnel-sql">-</strong></span> &bull;
+            <span>After Business Rules: <strong id="funnel-rules">-</strong></span> &bull;
+            <span>LLM Processed: <strong id="funnel-llm">-</strong></span>
+          </div>
+        </div>
+
+        <div id="status-message" class="status-message"></div>
+      </section>
+
+      <!-- Recent Batches Table -->
+      <section class="card batches-section">
+        <h2>Recent Batches</h2>
+        <div class="table-container">
+          <table class="batches-table">
+            <thead>
+              <tr>
+                <th>Batch ID</th>
+                <th>File</th>
+                <th>Status</th>
+                <th>Valid / Total</th>
+                <th>Matches</th>
+                <th>Emails</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="batches-tbody">
+              <tr>
+                <td colspan="7" class="empty-state">Loading batches...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Database Studio & pgAdmin Quick Connect -->
+      <section class="card pgadmin-banner">
+        <div class="pgadmin-banner-content">
+          <div class="pgadmin-text">
+            <h3>🗄️ Database Studio (pgAdmin 4)</h3>
+            <p>Direct visual access to PostgreSQL schema, tables, query tool, and ER Diagrams.</p>
+            <div class="credentials-badge">
+              <span><strong>URL:</strong> <a href="http://localhost:5050" target="_blank">http://localhost:5050</a></span> &bull;
+              <span><strong>User:</strong> <code>admin@admin.com</code></span> &bull;
+              <span><strong>pgAdmin Pass:</strong> <code>admin</code></span> &bull;
+              <span><strong>DB Pass:</strong> <code>loan_engine_dev_pass_2026</code></span>
+            </div>
+          </div>
+          <a href="http://localhost:5050" target="_blank" class="btn btn-primary pgadmin-btn">Open pgAdmin 4 ↗</a>
+        </div>
+      </section>
+
+      <!-- Visual Analytics & Charts Section -->
+      <section class="card analytics-section">
+        <div class="section-header-flex">
+          <h2>📊 Visual Analytics & Data Distribution</h2>
+          <button id="refresh-analytics-btn" class="btn btn-secondary btn-sm">Refresh Visuals</button>
+        </div>
+
+        <!-- KPI summary pills -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Active Products</div>
+            <div class="kpi-val" id="kpi-products">10</div>
+            <div class="kpi-sub" id="kpi-products-sub">4 Crawled &bull; 6 Seed</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Total Matches</div>
+            <div class="kpi-val" id="kpi-matches">41,398</div>
+            <div class="kpi-sub">From 90,000 Pairs</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">SQL Pass Rate</div>
+            <div class="kpi-val" id="kpi-sql-rate">46.0%</div>
+            <div class="kpi-sub">Stage 1 Pre-Filter</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Top Lender</div>
+            <div class="kpi-val" id="kpi-top-lender">SBI</div>
+            <div class="kpi-sub" id="kpi-top-lender-sub">14,480 Matches</div>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="charts-grid">
+          <!-- Funnel Chart Card -->
+          <div class="chart-card">
+            <h3>Matching Optimization Funnel</h3>
+            <div class="chart-wrapper">
+              <canvas id="chart-funnel" height="220"></canvas>
+            </div>
+          </div>
+
+          <!-- Lender Share Chart Card -->
+          <div class="chart-card">
+            <h3>Matches by Lender</h3>
+            <div class="chart-wrapper">
+              <canvas id="chart-lender" height="220"></canvas>
+            </div>
+          </div>
+
+          <!-- Credit Score Distribution -->
+          <div class="chart-card">
+            <h3>Borrower Credit Score Distribution</h3>
+            <div class="chart-wrapper">
+              <canvas id="chart-credit" height="220"></canvas>
+            </div>
+          </div>
+
+          <!-- Monthly Income Distribution -->
+          <div class="chart-card">
+            <h3>Borrower Monthly Income Distribution</h3>
+            <div class="chart-wrapper">
+              <canvas id="chart-income" height="220"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top Products List -->
+        <div class="top-products-container">
+          <h3>Top Matched Loan Products</h3>
+          <div id="top-products-list" class="products-grid">
+            <div class="empty-state">Loading product analytics...</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

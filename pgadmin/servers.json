@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Loan Eligibility Engine (Postgres)",
+      "Group": "Loan Engine",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "loan_engine",
+      "Username": "loan_admin",
+      "SSLMode": "prefer",
+      "PassFile": "/var/lib/pgadmin/pgpass"
+    }
+  }
+}

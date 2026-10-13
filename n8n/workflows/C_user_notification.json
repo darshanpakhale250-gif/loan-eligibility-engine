@@ -1,0 +1,260 @@
+{
+  "name": "C_User_Notification",
+  "id": "wf-loan-notification-03",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "loan-notify",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-webhook-notify",
+      "name": "Webhook Trigger (loan-notify)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        160,
+        340
+      ],
+      "webhookId": "loan-notify"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT\n  u.user_id,\n  u.name,\n  u.email AS csv_email,\n  ROW_NUMBER() OVER (ORDER BY u.user_id) AS user_seq,\n  json_agg(\n    json_build_object(\n      'match_id', m.match_id,\n      'product_id', p.id,\n      'lender_name', p.lender_name,\n      'product_name', p.product_name,\n      'interest_rate_min', p.interest_rate_min,\n      'interest_rate_max', p.interest_rate_max,\n      'loan_amount_min', p.loan_amount_min,\n      'loan_amount_max', p.loan_amount_max,\n      'source_url', p.source_url,\n      'score', m.score,\n      'reason', m.reason\n    )\n    ORDER BY p.interest_rate_min ASC NULLS LAST\n  ) AS matched_products\nFROM users u\nJOIN matches m ON u.user_id = m.user_id\nJOIN loan_products p ON m.product_id = p.id\nWHERE u.batch_id = '{{ $json.body.batch_id }}'::uuid\n  AND m.notification_status = 'pending'\nGROUP BY u.user_id, u.name, u.email\nORDER BY u.user_id\nLIMIT 50;"
+      },
+      "id": "node-sql-pending-matches",
+      "name": "Query Pending Matches",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        400,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(item => item.json);\nconst batchId = $('Webhook Trigger (loan-notify)').first().json.body.batch_id;\n\n// Read env configurations\nconst testEmailBase = $env.TEST_EMAIL_BASE || 'darshanpakhale06@gmail.com';\nconst maxEmails = parseInt($env.MAX_EMAILS_PER_RUN || '3', 10);\nconst isDryRun = ($env.EMAIL_DRY_RUN || 'false').toLowerCase() === 'true';\n\nconst atIdx = testEmailBase.indexOf('@');\nconst localPart = atIdx !== -1 ? testEmailBase.substring(0, atIdx) : 'darshanpakhale06';\nconst domainPart = atIdx !== -1 ? testEmailBase.substring(atIdx + 1) : 'gmail.com';\n\nconst words = ['one', 'two', 'three', 'four', 'five'];\nconst emailQueue = [];\nconst cappedItems = items.slice(0, maxEmails);\n\nfor (let i = 0; i < cappedItems.length; i++) {\n  const user = cappedItems[i];\n  const tag = words[i] || ('u' + (i + 1));\n  const safeRecipient = `${localPart}+${tag}@${domainPart}`;\n  const products = user.matched_products || [];\n\n  let productListHtml = '';\n  for (const prod of products) {\n    const rate = prod.interest_rate_min ? `${prod.interest_rate_min}%` : 'Variable';\n    const amt = prod.loan_amount_max ? `Up to ₹${Number(prod.loan_amount_max).toLocaleString('en-IN')}` : 'Flexible';\n    productListHtml += `\n      <li style=\"margin-bottom: 12px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;\">\n        <strong style=\"color: #0f172a; font-size: 15px;\">${prod.lender_name}</strong> – <span style=\"color: #334155;\">${prod.product_name}</span><br/>\n        <span style=\"font-size: 13px; color: #475569;\">Interest Rate: <b>${rate}</b> | Max Loan Amount: <b>${amt}</b></span><br/>\n        <a href=\"${prod.source_url}\" style=\"color: #2563eb; font-size: 13px; text-decoration: none;\">View Lender Product Details &rarr;</a>\n      </li>`;\n  }\n\n  const htmlContent = `\n    <div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px;\">\n      <h2 style=\"color: #1e40af; margin-top: 0;\">Loan Eligibility Engine – Product Matches</h2>\n      <p style=\"font-size: 15px;\">Hello <strong>${user.name || user.user_id}</strong>,</p>\n      <p style=\"font-size: 14px; color: #334155;\">Based on your applicant profile, here are the pre-qualified loan products matched for you:</p>\n      <ul style=\"list-style: none; padding: 0;\">\n        ${productListHtml}\n      </ul>\n      <hr style=\"border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;\" />\n      <p style=\"font-size: 12px; color: #94a3b8;\">\n        Dispatched to verified test inbox alias: <code>${safeRecipient}</code><br/>\n        (Mapped from CSV user: ${user.csv_email})<br/>\n        Demonstration pipeline operated via AWS SES &amp; n8n.\n      </p>\n    </div>\n  `;\n\n  const matchIds = products.map(p => p.match_id);\n\n  emailQueue.push({\n    batch_id: batchId,\n    user_id: user.user_id,\n    recipient_email: safeRecipient,\n    subject: `Personal Loan Recommendations for ${user.name || user.user_id} (${safeRecipient})`,\n    html_body: htmlContent,\n    match_ids: matchIds,\n    is_dry_run: isDryRun\n  });\n}\n\nreturn emailQueue.map(e => ({ json: e }));"
+      },
+      "id": "node-code-build-emails",
+      "name": "Build Emails & Test Aliases",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-is-dry-run",
+              "leftValue": "={{ $json.is_dry_run }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-if-dry-run",
+      "name": "Is Dry Run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nreturn [{\n  json: {\n    ...item,\n    delivery_status: 'simulated_sent',\n    note: 'EMAIL_DRY_RUN is enabled. Email logged, not dispatched to SES.'\n  }\n}];"
+      },
+      "id": "node-dry-run-log",
+      "name": "Simulate & Log Dry Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SES_FROM_EMAIL }}",
+        "toAddresses": [
+          "={{ $json.recipient_email }}"
+        ],
+        "subject": "={{ $json.subject }}",
+        "body": "={{ $json.html_body }}",
+        "isBodyHtml": true,
+        "additionalFields": {}
+      },
+      "id": "node-aws-ses-send",
+      "name": "AWS SES Send Email",
+      "type": "n8n-nodes-base.awsSes",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        440
+      ],
+      "credentials": {
+        "aws": {
+          "id": "cred-aws-ses-01",
+          "name": "AWS SES Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE matches SET notification_status = 'sent' WHERE user_id = '{{ $json.user_id || $('Build Emails & Test Aliases').item.json.user_id }}';\nSELECT 1;"
+      },
+      "id": "node-mark-matches-sent",
+      "name": "Update Matches Sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE upload_batches\nSET\n  emails_sent = (SELECT COUNT(DISTINCT user_id) FROM matches m WHERE m.notification_status = 'sent' AND m.user_id IN (SELECT user_id FROM users WHERE batch_id = '{{ $('Webhook Trigger (loan-notify)').first().json.body.batch_id }}'::uuid)),\n  status = 'completed',\n  completed_at = NOW()\nWHERE batch_id = '{{ $('Webhook Trigger (loan-notify)').first().json.body.batch_id }}'::uuid;"
+      },
+      "id": "node-final-batch-completed",
+      "name": "Complete Batch Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1540,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "cred-postgres-01",
+          "name": "Postgres Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger (loan-notify)": {
+      "main": [
+        [
+          {
+            "node": "Query Pending Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Pending Matches": {
+      "main": [
+        [
+          {
+            "node": "Build Emails & Test Aliases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Emails & Test Aliases": {
+      "main": [
+        [
+          {
+            "node": "Is Dry Run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Dry Run?": {
+      "main": [
+        [
+          {
+            "node": "Simulate & Log Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AWS SES Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simulate & Log Dry Run": {
+      "main": [
+        [
+          {
+            "node": "Update Matches Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AWS SES Send Email": {
+      "main": [
+        [
+          {
+            "node": "Update Matches Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Matches Sent": {
+      "main": [
+        [
+          {
+            "node": "Complete Batch Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  }
+}
