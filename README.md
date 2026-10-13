@@ -30,15 +30,15 @@ flowchart TD
         SES["AWS Simple Email Service (SES)"]
     end
 
-    Browser -->|HTTP GET/POST /api/| Frontend
-    N8nAdmin -.->|Manage Workflows| N8n
-    Frontend -->|Reverse Proxy /api/| Backend
-    Backend -->|Stream Ingestion & Bulk Upsert| Postgres
-    Backend -->|Trigger Webhook /loan-match| N8n
-    N8n -->|Call /internal/crawl (Token Auth)| Backend
-    Backend -->|Headless Chromium (Crawl4AI)| Banks
-    N8n -->|Set-based SQL Pre-filter & Funnel| Postgres
-    N8n -->|Send Notification| SES
+    Browser -->|"HTTP GET/POST /api/"| Frontend
+    N8nAdmin -.->|"Manage Workflows"| N8n
+    Frontend -->|"Reverse Proxy /api/"| Backend
+    Backend -->|"Stream Ingestion & Bulk Upsert"| Postgres
+    Backend -->|"Trigger Webhook /loan-match"| N8n
+    N8n -->|"Call /internal/crawl - Token Auth"| Backend
+    Backend -->|"Headless Chromium - Crawl4AI"| Banks
+    N8n -->|"Set-based SQL Pre-filter & Funnel"| Postgres
+    N8n -->|"Send Notification"| SES
 ```
 
 ### The Four Containers
