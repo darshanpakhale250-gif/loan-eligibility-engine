@@ -1,0 +1,8 @@
+# Seed URLs – official bank personal loan product pages.
+# Lines starting with # are comments. Blank lines are ignored.
+# Only HTTPS URLs on approved hosts are accepted.
+# Adding a site: add its URL below AND its config in backend/app/crawler/sites.yml.
+
+https://sbi.bank.in/web/personal-banking/loans/personal-loans/sbi-personal-loan
+https://www.hdfc.bank.in/personal-loan
+https://www.icicibank.com/personal-banking/loans/personal-loan

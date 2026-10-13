@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+data/
+*.jsonl
+.env
+.vscode
+.idea
+node_modules
+.serverless

@@ -1,0 +1,46 @@
+# Site-specific crawl configuration.
+# Adding a new bank site requires ONLY editing this file (and seeds.txt).
+# No code changes needed.
+
+sites:
+  - name: sbi
+    display_name: State Bank of India
+    allowed_hosts:
+      - sbi.co.in
+      - www.sbi.co.in
+      - sbi.bank.in
+      - www.sbi.bank.in
+    url_patterns:
+      - "*personal-loan*"
+      - "*personal-loans*"
+      - "*sbi-personal-loan*"
+      - "*personal-loan*eligib*"
+      - "*personal-loan*interest*"
+      - "*personal-loan*charges*"
+      - "*personal-loan*fees*"
+
+  - name: hdfc
+    display_name: HDFC Bank
+    allowed_hosts:
+      - hdfcbank.com
+      - www.hdfcbank.com
+      - hdfc.bank.in
+      - www.hdfc.bank.in
+    url_patterns:
+      - "*personal-loan*"
+      - "*personal-loans*"
+      - "*personal-loan*eligib*"
+      - "*personal-loan*interest*"
+      - "*personal-loan*charges*"
+
+  - name: icici
+    display_name: ICICI Bank
+    allowed_hosts:
+      - icicibank.com
+      - www.icicibank.com
+    url_patterns:
+      - "*personal-loan*"
+      - "*personal-loans*"
+      - "*personal-loan*eligib*"
+      - "*personal-loan*interest*"
+      - "*personal-loan*charges*"
