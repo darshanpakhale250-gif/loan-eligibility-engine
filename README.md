@@ -2,6 +2,10 @@
 
 A robust, production-grade automated batch loan eligibility matching engine and crawler orchestration platform built with **FastAPI**, **Crawl4AI**, **self-hosted n8n**, **PostgreSQL**, and **AWS Serverless infrastructure**.
 
+> 📺 **Project Demonstration & Explanation:**  
+> Watch the complete video walkthrough and technical explanation of the whole project:  
+> **[▶ Watch Project Demonstration (Google Drive)](https://drive.google.com/file/d/1Tb2yYpNavjT_6wwWM2Y2KSFBDNR3tY6d/view?usp=sharing)**
+
 ---
 
 ## 1. Architecture Overview
