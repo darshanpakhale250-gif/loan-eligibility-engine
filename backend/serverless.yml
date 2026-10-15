@@ -1,23 +1,28 @@
 service: loan-eligibility-engine
 
 frameworkVersion: '3'
+useDotenv: true
 
 provider:
   name: aws
   runtime: python3.11
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, 'ap-south-1'}
   stage: ${opt:stage, 'dev'}
+  architecture: x86_64
   memorySize: 512
-  timeout: 60
+  timeout: 30
+  logRetentionInDays: 14
+  httpApi:
+    cors: true
   environment:
-    POSTGRES_HOST: ${env:POSTGRES_HOST, 'rds.internal.example.com'}
-    POSTGRES_PORT: ${env:POSTGRES_PORT, '5432'}
-    POSTGRES_USER: ${env:POSTGRES_USER, 'loan_admin'}
-    POSTGRES_PASSWORD: ${env:POSTGRES_PASSWORD, 'change_me'}
-    POSTGRES_DB: ${env:POSTGRES_DB, 'loan_engine'}
-    WEBHOOK_SECRET: ${env:WEBHOOK_SECRET, 'secret-webhook'}
-    N8N_WEBHOOK_BASE_INTERNAL: ${env:N8N_WEBHOOK_BASE_INTERNAL, 'http://n8n.internal:5678/webhook'}
-    S3_BUCKET_NAME: !Ref UploadsBucket
+    POSTGRES_HOST: ${env:POSTGRES_HOST}
+    POSTGRES_PORT: ${env:POSTGRES_PORT}
+    POSTGRES_USER: ${env:POSTGRES_USER}
+    POSTGRES_PASSWORD: ${env:POSTGRES_PASSWORD}
+    POSTGRES_DB: ${env:POSTGRES_DB}
+    WEBHOOK_SECRET: ${env:WEBHOOK_SECRET}
+    N8N_WEBHOOK_BASE_INTERNAL: ${env:N8N_WEBHOOK_BASE_INTERNAL}
+    S3_BUCKET_NAME: ${self:custom.bucketName}
   iam:
     role:
       statements:
@@ -26,26 +31,44 @@ provider:
             - s3:GetObject
             - s3:PutObject
           Resource:
-            - !Sub "${UploadsBucket.Arn}/*"
+            - arn:aws:s3:::${self:custom.bucketName}/uploads/*
+  vpc:
+    securityGroupIds:
+      - ${env:LAMBDA_SG_ID}
+    subnetIds:
+      - ${env:LAMBDA_SUBNET_A}
+      - ${env:LAMBDA_SUBNET_B}
 
-# NOTE ON RDS / VPC:
-# If PostgreSQL runs inside an Amazon VPC (e.g. AWS RDS), attach the Lambda functions
-# to the corresponding VPC subnets and security groups:
-# vpc:
-#   securityGroupIds:
-#     - sg-0123456789abcdef0
-#   subnetIds:
-#     - subnet-0123456789abcdef0
-#     - subnet-0fedcba9876543210
+plugins:
+  - serverless-python-requirements
+
+custom:
+  bucketName: loan-eligibility-uploads-${aws:accountId}-${self:provider.stage}
+  pythonRequirements:
+    fileName: requirements-lambda.txt
+    dockerizePip: false
+    pipCmdExtraArgs:
+      - '--platform'
+      - 'manylinux2014_x86_64'
+      - '--only-binary=:all:'
+      - '--implementation'
+      - 'cp'
+      - '--python-version'
+      - '3.11'
+    slim: true
 
 package:
   patterns:
+    - 'app/**'
+    - 'lambda_handlers/**'
+    - '!app/crawler/**'
+    - '!app/routes/**'
+    - '!app/main.py'
     - '!node_modules/**'
     - '!.git/**'
     - '!tests/**'
     - '!__pycache__/**'
-    - 'app/**'
-    - 'lambda_handlers/**'
+    - '!**/*.pyc'
 
 functions:
   presignUpload:
@@ -61,24 +84,37 @@ functions:
     description: Ingest CSV uploaded to S3, validate rows, bulk upsert, trigger n8n
     timeout: 300
     memorySize: 1024
-    events:
-      - s3:
-          bucket: !Ref UploadsBucket
-          event: s3:ObjectCreated:*
-          rules:
-            - prefix: uploads/
-            - suffix: .csv
-          existing: true
 
 resources:
   Resources:
     UploadsBucket:
       Type: AWS::S3::Bucket
+      DependsOn: ProcessCsvUploadLambdaPermission
       Properties:
-        BucketName: !Sub "loan-eligibility-uploads-${AWS::AccountId}-${self:provider.stage}"
+        BucketName: ${self:custom.bucketName}
+        NotificationConfiguration:
+          LambdaConfigurations:
+            - Event: s3:ObjectCreated:*
+              Function: !GetAtt ProcessCsvUploadLambdaFunction.Arn
+              Filter:
+                S3Key:
+                  Rules:
+                    - Name: prefix
+                      Value: uploads/
+                    - Name: suffix
+                      Value: .csv
         CorsConfiguration:
           CorsRules:
             - AllowedHeaders: ['*']
-              AllowedMethods: [PUT, POST, GET]
+              AllowedMethods: [PUT, GET]
               AllowedOrigins: ['*']
               MaxAge: 3000
+
+    ProcessCsvUploadLambdaPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt ProcessCsvUploadLambdaFunction.Arn
+        Action: lambda:InvokeFunction
+        Principal: s3.amazonaws.com
+        SourceAccount: ${aws:accountId}
+        SourceArn: arn:aws:s3:::${self:custom.bucketName}

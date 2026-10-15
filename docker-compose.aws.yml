@@ -1,0 +1,114 @@
+# docker-compose.aws.yml – AWS deployment stack (standalone)
+# No local postgres or pgadmin. Backend connects to RDS via POSTGRES_HOST env.
+# n8n uses env-driven admin credentials. Backend ports are NOT exposed to host.
+
+services:
+  # ─── 1. Frontend (Static UI + API Reverse Proxy) ───────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── 2. Backend (FastAPI, Ingestion, Crawl4AI Crawler) ─────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    init: true
+    shm_size: "1gb"
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - N8N_WEBHOOK_BASE_INTERNAL=${N8N_WEBHOOK_BASE_INTERNAL:-http://n8n:5678/webhook}
+      - STORAGE_MODE=${STORAGE_MODE:-s3}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - PRESIGN_EXPIRATION_SECONDS=${PRESIGN_EXPIRATION_SECONDS:-900}
+      - UPLOAD_DIR=/data/uploads
+      - CRAWL_DIR=/data/crawl
+      - MAX_PAGES=${MAX_PAGES:-2}
+      - MAX_DEPTH=${MAX_DEPTH:-1}
+      - PAGE_TIMEOUT_MS=${PAGE_TIMEOUT_MS:-15000}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── 3. n8n (Workflow Automation) ──────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:1.76.1
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - TZ=Asia/Kolkata
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - WEBHOOK_URL=http://localhost:5678/
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=true
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      - N8N_INSTANCE_OWNER_MANAGED_BY_ENV=true
+      - N8N_DEFAULT_USER_EMAIL=${N8N_DEFAULT_USER_EMAIL}
+      - N8N_DEFAULT_USER_PASSWORD=${N8N_DEFAULT_USER_PASSWORD}
+      - N8N_DEFAULT_USER_FIRST_NAME=Admin
+      - N8N_DEFAULT_USER_LAST_NAME=Admin
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - INTERNAL_TOKEN=${INTERNAL_TOKEN}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - LLM_MAX_PAIRS=${LLM_MAX_PAIRS:-100}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - SES_FROM_EMAIL=${SES_FROM_EMAIL:-}
+      - TEST_EMAIL_BASE=${TEST_EMAIL_BASE:-}
+      - TEST_VERIFIED_EMAILS=${TEST_VERIFIED_EMAILS:-}
+      - MAX_EMAILS_PER_RUN=${MAX_EMAILS_PER_RUN:-3}
+      - EMAIL_DRY_RUN=${EMAIL_DRY_RUN:-true}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/n8n:ro
+    entrypoint: ["/bin/sh", "/n8n/bootstrap.sh"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  n8n_data:

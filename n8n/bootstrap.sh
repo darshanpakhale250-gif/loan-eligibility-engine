@@ -6,7 +6,9 @@ echo "[n8n bootstrap] Starting initialization..."
 # Check if credentials template exists and n8n CLI is available
 if [ -f /n8n/credentials.template.json ]; then
     echo "[n8n bootstrap] Rendering credentials from environment..."
-    sed -e "s|\${POSTGRES_USER}|${POSTGRES_USER}|g" \
+    POSTGRES_HOST="${POSTGRES_HOST:-postgres}"
+    sed -e "s|\${POSTGRES_HOST}|${POSTGRES_HOST}|g" \
+        -e "s|\${POSTGRES_USER}|${POSTGRES_USER}|g" \
         -e "s|\${POSTGRES_PASSWORD}|${POSTGRES_PASSWORD}|g" \
         -e "s|\${POSTGRES_DB}|${POSTGRES_DB}|g" \
         -e "s|\${INTERNAL_TOKEN}|${INTERNAL_TOKEN}|g" \

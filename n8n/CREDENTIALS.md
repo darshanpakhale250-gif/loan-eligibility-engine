@@ -18,7 +18,7 @@ Used by Workflows A, B, and C to query and persist batches, products, and matche
 
 - **Name**: `Postgres Account`
 - **Type**: `PostgreSQL`
-- **Host**: `postgres`
+- **Host**: Value of `POSTGRES_HOST` (default: `postgres` for local Docker Compose; set to RDS endpoint on AWS)
 - **Database**: `loan_engine` (from `POSTGRES_DB`)
 - **User**: `loan_admin` (from `POSTGRES_USER`)
 - **Password**: `admin123` (from `POSTGRES_PASSWORD`)

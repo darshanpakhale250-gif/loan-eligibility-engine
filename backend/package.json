@@ -1,0 +1,10 @@
+{
+  "name": "loan-eligibility-engine-backend",
+  "version": "1.0.0",
+  "description": "Serverless backend for Loan Eligibility Engine",
+  "private": true,
+  "devDependencies": {
+    "serverless": "^3.39.0",
+    "serverless-python-requirements": "^6.1.2"
+  }
+}
