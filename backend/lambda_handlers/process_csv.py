@@ -47,7 +47,7 @@ def handler(event, context):
             try:
                 # Run the shared core ingestion orchestrator
                 logger.info("Executing core ingestion for batch %s", batch_id)
-                run_ingestion(batch_id, download_path, filename)
+                run_ingestion(batch_id, download_path)
             finally:
                 if os.path.exists(download_path):
                     os.remove(download_path)

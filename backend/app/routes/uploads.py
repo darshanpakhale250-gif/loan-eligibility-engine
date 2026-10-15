@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.db import get_db
 from app.ingestion.core import run_ingestion
+from app.s3 import sanitize_filename, generate_presigned_put_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
@@ -36,6 +37,11 @@ def create_upload(body: CreateUploadRequest):
     if not body.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are accepted")
 
+    try:
+        sanitized_filename = sanitize_filename(body.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     batch_id = str(uuid.uuid4())
 
     with get_db() as conn:
@@ -45,11 +51,21 @@ def create_upload(body: CreateUploadRequest):
                 INSERT INTO upload_batches (batch_id, filename, status)
                 VALUES (%s, %s, 'created')
                 """,
-                (batch_id, body.filename),
+                (batch_id, sanitized_filename),
             )
 
-    upload_url = f"/api/uploads/{batch_id}"
-    logger.info("Created batch %s for file '%s'", batch_id, body.filename)
+    if settings.storage_mode == "s3":
+        s3_key = f"uploads/{batch_id}/{sanitized_filename}"
+        upload_url = generate_presigned_put_url(
+            bucket_name=settings.s3_bucket_name,
+            s3_key=s3_key,
+            region_name=settings.aws_region,
+            expires_in=settings.presign_expiration_seconds,
+        )
+    else:
+        upload_url = f"/api/uploads/{batch_id}"
+
+    logger.info("Created batch %s for file '%s' (storage_mode=%s)", batch_id, sanitized_filename, settings.storage_mode)
     return CreateUploadResponse(batch_id=batch_id, upload_url=upload_url)
 
 

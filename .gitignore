@@ -10,6 +10,14 @@ env/
 
 # Environment secrets
 .env
+.env.*
+!.env.example
+!.env.aws.example
+backend/.env*
+backend/node_modules/
+backend/.serverless/
+backend/.requirements/
+deploy/
 
 # IDE
 .vscode/
@@ -34,4 +42,5 @@ data/
 
 # Internal prompts & notes
 *PROMPT*.md
+
 
