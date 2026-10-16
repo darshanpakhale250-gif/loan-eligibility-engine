@@ -8,6 +8,21 @@ A robust, production-grade automated batch loan eligibility matching engine and 
 
 ---
 
+## 🌐 Live Deployment (AWS EC2)
+
+The application is deployed and running on an AWS EC2 instance:
+
+| Service | URL |
+|---|---|
+| **Frontend Dashboard** | [http://16.178.120.61:8080](http://16.178.120.61:8080) |
+| **n8n Workflow UI** | [http://16.178.120.61:5678](http://16.178.120.61:5678) |
+| **Backend API Docs** | [http://16.178.120.61:8080/api/docs](http://16.178.120.61:8080/api/docs) |
+
+> 🔑 **n8n Login Credentials:** Provided separately to reviewers (see submission notes).  
+> ⚠️ This is a demo deployment. The EC2 instance may be stopped after the review period.
+
+---
+
 ## 1. Architecture Overview
 
 The platform operates across **four strictly isolated Docker containers** connected via an internal bridge network (`loan_net`). Only the frontend port (`8080`) and the n8n orchestration UI (`5678`) are mapped to the host; internal backend routes and the PostgreSQL database are never exposed directly to the outside network.
